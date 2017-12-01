@@ -977,7 +977,7 @@ The Skip Capacity Check flag defaults to true. When it is set to false, the "isO
     + token (required, string)
     + zipcode (required, integer)
     + limit (optional, integer)
-    + skipCapacityCheck (optinal, boolean)
+    + skipCapacityCheck (optional, boolean)
 
 + Response 200 (application/json)
 
@@ -2087,33 +2087,33 @@ Event API is read only stream of events for all orders. Order status is updated 
 
 + Response 200 (application/json)
 
-    {
-      "code": 200,
-      "timestamp": 1427468187,
-      "data": [
         {
-          "id": "618eb9fa1b9f094e09ff7ead3681bd52",
-          "event": "8200",
-          "type": "Vessel",
-          "name": "Packed",
-          "createTime": "2013-12-18 00:00:00",
-          "orderId": "62"
-        },
-        {
-          "id": "9059f337e5c76d906696fcf2434007e4",
-          "event": "8300",
-          "type": "Vessel",
-          "name": "Shipping label printed",
-          "createTime": "2013-12-18 00:00:00",
-          "orderId": "62"
-        },
-        {
-          "id": "339b6fcce0c8b739278d61bde52936d2",
-          "event": "8200",
-          "type": "Vessel",
-          "name": "Packed",
-          "createTime": "2013-12-19 00:00:00",
-          "orderId": "63"
+            "code": 200,
+            "timestamp": 1427468187,
+            "data": [
+                {
+                    "id": "618eb9fa1b9f094e09ff7ead3681bd52",
+                    "event": "8200",
+                    "type": "Vessel",
+                    "name": "Packed",
+                    "createTime": "2013-12-18 00:00:00",
+                    "orderId": "62"
+                },
+                {
+                    "id": "9059f337e5c76d906696fcf2434007e4",
+                    "event": "8300",
+                    "type": "Vessel",
+                    "name": "Shipping label printed",
+                    "createTime": "2013-12-18 00:00:00",
+                    "orderId": "62"
+                },
+                {
+                    "id": "339b6fcce0c8b739278d61bde52936d2",
+                    "event": "8200",
+                    "type": "Vessel",
+                    "name": "Packed",
+                    "createTime": "2013-12-19 00:00:00",
+                    "orderId": "63"
+                }
+            ]
         }
-      ]
-    }
