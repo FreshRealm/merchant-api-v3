@@ -1,0 +1,2119 @@
+FORMAT: 1A
+HOST: https://api3.sandbox.myfrcloud.com
+
+# FreshRealm REST API 3.0 Documentation
+
+This document describes the calls needed to interact with FreshRealm’s v3 Merchant API.
+
+# Example API Flow
+This section describes a sample customer flow through a simple e-commerce experience and the necessary API calls to support it. Details of each call can be found in the documentation that follows.
+
+### Step 0: API Authentication
+The e-commerce system should use the `Authentication` resource to get an authentication token that will be used in all other API calls.
+This authentication call should be done server-side in order to protect the merchant's authentication secret.
+
+### Step 1: Checking Delivery Availability
+When a customer first arrives, they should be asked for their zip code so that it can be validated whether their Orders can be fulfilled.
+
+This is often most efficiently done by making a call to the `Get Shipping Days` resource.
+This serves two purposes: first, it verifies that the zip code is servicable by FreshRealm; second, it returns a list of upcoming available delivery dates that can be used to schedule the delivery of the customer's Order.
+
+### Step 2: Checking Product Availability
+Products have both regional and seasonal availabiltiy based on their availability for production from FreshRealm's Food Makers.
+
+In order to safely present a list of available products to a customer and have confidence that their eventual Order will be fulfilled,
+the e-commerce system should filter the products presented to the customer using the results of the `Product Availabilities` resource. This resource requires both the zip code and the delivery date be provided.
+
+If a customer changes their delivery zip code or their delivery date, their selected products should be re-validated with regards to availability. An Order that includes unavailable products will be rejected by the FreshRealm Cloud.
+
+### Step 3: Validating a Customer's Cart can be Ordered
+In addition to pre-validating the products that are made available to the customer, it may be desirable to validate how a customer's Order will be fulfilled before converting their Cart into an Order.
+Cart validation rules related to Porter fullness in particular may be desirable (for example, shipping a Porter that only has a couple of food containers in it results in a bad customer experience).
+
+The most useful tool for this is the `Pack Products` resource. Each Porter's data in the result set can be evaluated against a set of business rules and the customer's Cart.
+For instance, if the result set includes only a single Porter with a 20% load value, then the customer could be present a message stating that they must select more products for their Order.
+
+This step should be re-done if the Customer subsequently changes their zip code or their delivery date. 
+This is because the Porter Pack will vary by zip code and delivery date due to the way weather forecasts are used to determine the required coolant counts for the shipment, which then affects the pack.
+
+### Step 4: Placing the Order
+Once a customer's cart has been validated, their email and delivery address information can be gathered and an Order can be created. A typical API patern for new customers is to:
+1. Create a new `Customer` record and save their FreshRealm Cloud customer ID for future use
+2. Create a new `Address` record and save the resulting FreshRealm Cloud address ID for future use
+3. Create a new `Order` record using the customer and address IDs previously created
+
+For repeat customers steps 1 and 2 can be skipped if their FreshRealm Cloud IDs were saved within the e-commerce system. This will result in reduced API usage and increased performance related to Order creation.
+
+# Output Format and Structure
+JSON will be returned in all responses from this API, with the following structure.
+
+    {
+        "code": 200,
+        "timestamp": 1367975121,
+        "data": {
+            “id”: 5,
+            ...,
+            ...,
+            ...
+        }
+    }
+
+
+`Code` is one of the following standard HTTP status codes:
+
+1.  `200` OK
+2.  `400` Bad Request
+3.  `401` Access Denied
+4.  `403` Token key is not valid
+5.  `404` Resource Not Found
+6.  `500` Internal Server Error
+7.  `501` Not Implemented
+
+`Timestamp` is a UNIX timestamp that indicates when the server started processing the request.
+
+`Data` contains attributes of a single resource or array of resources.
+
+# Service Endpoints
+An endpoint is the URL of the server that handles your request.  The API endpoint for all requests in this document is https://api3.sandbox.myfrcloud.com/
+
+# Limit and Offset
+Retrieving a large list of resources in one request will degrade performance. Use `limit` and `offset` GET attributes to divide your request into multiple queries. The default value for `limit` is 100, which is being used when limit is not provided. Maximal number of records returned is 500. The default ordering is most recent records first. For example, if we want to get the next 50 orders starting from, and including, position 150 (150th most recent order), use the following call:
+
+`http://api2.sandbox.freshrealm.co/orders?offset=150&limit=50`
+
+### Timestamp Filter
+This filter allows retrieval of records created or modified after this time. Every request returns a timestamp, which can be used for this filter. It can be used for database synchronization of products between FreshRealm and your application. The following call would return all orders modified or created after `1367975121`.
+
+`http://api2.sandbox.freshrealm.co/orders?timestamp=1367975121`
+
+The following workflow will significantly improve performance of api data transer. Timestamp should be used when downloading multiple resources - for example: `/products` or `/orders`
+
+ - load latest timestamp for resource from cache/db/filesystem
+ - call api, apply timestamp and limit
+  - if `X-Pagination-Current-Page` header is less then `X-Pagination-Page-Count` call again with incremented offset
+ - save timestamp from latest call to cache/db/filesystem
+
+# Vessel/Porter Terminology
+Due to it's use in older resource URLs, this documentation refers to both Vessels and Porters. Both terms refer to the shipping container used for FreshRealm deliveries.
+
+# Contributing
+This API documentation lives on Github. If you see an error or a typo, please submit a pull request at [https://github.com/freshrealm/merchant-api-v3](https://github.com/freshrealm/merchant-api-v3). We're always happy to have contributions.
+
+# Group Authentication
+FreshRealm’s REST API currently uses a proprietary authentication system. Each client gets its own API access token, which must be a part of every request sent to the FreshRealm API.  You must obtain this token by using our authentication call and supplying your secret, which we will provide to you.
+The token has lifespan of one month, but it can expire earlier. The token can be passed in url as GET or in request body with PUT or POST parameters.
+
+### Recommended api authentication flow
+
+ - load local token
+  - no token: call authenticate
+  - save token locally (cache, db, filestystem)
+ - call api resource using token
+ - call returns 200: process results
+ - call returns 401: get new token
+  - call authenticate
+  - save token locally
+  - repeat the previous call with new token
+
+##Get Authentication Token [/authenticate]
+### POST
++ Request (application/json)
+Your FreshRealm secret must be obtained by contacting FreshRealm.
+
+    + Body
+
+            {
+                "secret": "myFreshRealmSecret"
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1465982944,
+            "data": {
+                "token": "myNewToken",
+                "expiration": 1468661344
+            }
+        }
+
+# Group Products
+
+A **product** is an active item or set of items available for customer to purchase. Product is using "SKU" number as primary identifier for order API and product updates.
+
+The following table describes which attributes are provided by default, and which can be used as a filter.
+
+
+| Field                 | Can Edit   | Description |
+|-----------------------|-----------|-------------|
+| `id`                    |          | FreshRealm item id |
+| `itemName`              |        | Name of the product |
+| `customName`            |    X    | Customize name of the product |
+| `sku`                   |        | Retailer defined item SKU used as primary identifier for product. It is a string with maximum length of 45 characters. SKU must be a unique string.|
+| `type`                  |        | "single" - one item, "meal\_kit" - set of items that are supposed to be prepared together, "bundle" - one or more items or meal kits |
+| `subtype`               |        | single,bundle, meal\_kit, pack\_in
+| `gtin`                  |        | Global gtin identification number |
+| `published`             |    X   | A published flag (boolean) that can be used to control visibility on E-commerce platform |
+| `purchasable`           |        | Field is calculated from two availability date ranges. |
+| `availabilityStart1`    |    X   | Product will be published on this date |
+| `availabilityEnd1`      |    X   | Product will be unpublished on this date |
+| `availabilityStart2`    |    X   | Product will be published on this date |
+| `availabilityEnd2`      |    X   | Product will be unpublished on this date |
+| `description`           |    X   | Product description |
+| `size`                  |        | An array containing `height`, `width`, `length`, `containerId`, `containerName`, `estimatedVesselLoad` and `slots`. A Porter has capacity of 40 slots. |
+| `weight`                |        | Weight |
+| `weightUnit`            |        | Unit of weight used e.g. lb, oz, etc. |
+| `itemType`            |        | Either `product` or `meal_plan` |
+| `freshRealmCost`        |        | FreshRealm Cost |
+| `categories`            |    X      | List of categories - categories will be deprecated soon. Use tags instead. |
+| `tagGroups`            |     X      | Each product can be assigned to multiple groups with different tags inside. Groups can be used for navigation or categories. Groups have following structure: groupId => [tag1Id, tag2Id] |
+| `updateTime`            |           | Time of last update |
+| `imageUrl`              |           | Default image url in the full resolution |
+| `nutritionInfo`         |        | Nutritional information for a product. Included by default if individual product is requested but not when list of products is requested |
+| `isAvailable`           |           | Whether or not it is currently available for purchase |
+| `ingredients`           |           | Ingredients of the product |
+| `allergens`             |           | Product allergens |
+| `itemType`              |           |  Type of item. For e.g : raw material , packing supply, etc|
+| `shippingLocations`     |           | Available shipping locations for the specified product|
+| `subProducts`     |           | List of SKU number of sub products. This field is used by meal type of product.|
+| `customData`     |           | Save additional product information as key value pairs. Custom data might come pre-populated by food maker. It is recommended to save product information from e-commerce platform to this field.|
+
+## List Products [/products?key={token}]
+Return all of the products. See the `Products` resource table for more information.
+
+### GET
+
++ Parameters
+    + token (required, string)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1444685980,
+            "data": [
+                {
+                    "id": "watermelon-spears",
+                    "itemName": "Watermelon Spears",
+                    "customName": "Watermelon Spears",
+                    "price": "8",
+                    "sku": "watermelon-spears",
+                    "type": "single",
+                    "subtype": "single",
+                    "gtin": "10826766900302",
+                    "published": "1",
+                    "purchasable": "1",
+                    "description": null,
+                    "size": {
+                        "height": "2.26",
+                        "width": "3.71",
+                        "length": "7.61",
+                        "containerId": "1",
+                        "containerName": "Medium Container",
+                        "estimatedVesselLoad": "5",
+                        "slots": "2"
+                    },
+                    "weight": "20",
+                    "weightUnit": "oz",
+                    "freshRealmCost": "3.10",
+                    "updateTime": 1441820406,
+                    "categories": [],
+                    "tagGroups": [],
+                    "imageUrl": null,
+                    "nutritionInfo": {
+                        "Serving Size": {
+                            "amount": "280",
+                            "unit": "g",
+                            "weightGrams": "280",
+                            "percentDaily": null
+                        },
+                        "Servings Per Container": {
+                            "amount": "2",
+                            "unit": "",
+                            "weightGrams": null,
+                            "percentDaily": null
+                        },
+                        "Calories": {
+                            "amount": "80",
+                            "unit": "KCal",
+                            "weightGrams": null,
+                            "percentDaily": 4
+                        },
+                        "Sodium": {
+                            "amount": "10",
+                            "unit": "mg",
+                            "weightGrams": 0.01,
+                            "percentDaily": 0
+                        },
+                        "Carbohydrates": {
+                            "amount": "27",
+                            "unit": "g",
+                            "weightGrams": "27",
+                            "percentDaily": 9
+                        },
+                        "Fiber": {
+                            "amount": "2",
+                            "unit": "g",
+                            "weightGrams": "2",
+                            "percentDaily": 8
+                        },
+                        "Sugar": {
+                            "amount": "25",
+                            "unit": "g",
+                            "weightGrams": "25",
+                            "percentDaily": 28
+                        },
+                        "Protein": {
+                            "amount": "1",
+                            "unit": "g",
+                            "weightGrams": "1",
+                            "percentDaily": 2
+                        },
+                        "Vitamin A": {
+                            "amount": "20",
+                            "unit": "%",
+                            "weightGrams": null,
+                            "percentDaily": 3
+                        },
+                        "Vitamin C": {
+                            "amount": "25",
+                            "unit": "%",
+                            "weightGrams": null,
+                            "percentDaily": 42
+                        },
+                        "Calcium": {
+                            "amount": "2",
+                            "unit": "%",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Iron": {
+                            "amount": "4",
+                            "unit": "%",
+                            "weightGrams": null,
+                            "percentDaily": 22
+                        }
+                    },
+                    "productType": "single",
+                    "isAvailable": true,
+                    "shippingLocations": [],
+                    "ingredients": [
+                        "Watermelon "
+                    ],
+                    "subProducts": [],
+                    "alergens": [],
+                    "itemType": "product",
+                    "isUsda": false,
+                    "shelfLife": null,
+                    "customData": []
+                }
+            ]
+        }
+
+## Get A Product [/products/{sku}?key={token}]
+Fetch a product by its `sku`.
+
+### GET
+
++ Parameters
+    + sku (required, number, `1`)
+    + token (required, string)
+
++ Response 200 (application/json)
+
+                {
+                    "code": 200,
+                    "timestamp": 184653225,
+                    "data": {
+                        "id":"1391",
+                        "sku":"1391",
+                        "itemName":"Turkey, Egg White & Sundried Tomato Breakfast",
+                        "customName":null,
+                        "gtin":"10826766900005",
+                        "published":"0",
+                        "description":null,
+                        "size":{
+                            "height":"2.26",
+                            "width":"3.71",
+                            "length":"7.61",
+                            "containerId":"1",
+                            "containerName":"Medium Container",
+                            "estimatedVesselLoad":"5"
+                        },
+                        "weight":"7.500",
+                        "weightUnit":"oz",
+                        "freshRealmCost":null,
+                        "updateTime":1402509020,
+                        "categories":[
+
+                        ],
+                        "imageUrl":null,
+                        "nutritionInfo":{
+                            "Calories":{
+                                "amount":"285.36",
+                                "unit":"KCal",
+                                "weightGrams":null,
+                                "percentDaily":15
+                            },
+                            "Fat Calories":{
+                                "amount":"35.86",
+                                "unit":"KCal",
+                                "weightGrams":null,
+                                "percentDaily":8
+                            },
+                            "Fat":{
+                                "amount":"3.98",
+                                "unit":"g",
+                                "weightGrams":"3.98",
+                                "percentDaily":7
+                            },
+                            "Saturated Fat":{
+                                "amount":"1.49",
+                                "unit":"g",
+                                "weightGrams":"1.49",
+                                "percentDaily":8
+                            },
+                            "Polyunsaturated Fat":{
+                                "amount":null,
+                                "unit":"g",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Monounsaturated Fat":{
+                                "amount":null,
+                                "unit":"g",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Trans Fat":{
+                                "amount":"0",
+                                "unit":"g",
+                                "weightGrams":"0",
+                                "percentDaily":0
+                            },
+                            "Cholesterol":{
+                                "amount":"14.72",
+                                "unit":"mg",
+                                "weightGrams":0.01472,
+                                "percentDaily":5
+                            },
+                            "Carbohydrates":{
+                                "amount":"48.07",
+                                "unit":"g",
+                                "weightGrams":"48.07",
+                                "percentDaily":17
+                            },
+                            "Fiber":{
+                                "amount":"4.12",
+                                "unit":"g",
+                                "weightGrams":"4.12",
+                                "percentDaily":17
+                            },
+                            "Sugar":{
+                                "amount":"14",
+                                "unit":"g",
+                                "weightGrams":"14",
+                                "percentDaily":16
+                            },
+                            "Protein":{
+                                "amount":"15.84",
+                                "unit":"g",
+                                "weightGrams":"15.84",
+                                "percentDaily":32
+                            },
+                            "Vitamin A":{
+                                "amount":null,
+                                "unit":"mcg",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Thiamine B1":{
+                                "amount":null,
+                                "unit":"mcg",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Vitamin B6":{
+                                "amount":null,
+                                "unit":"mcg",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Folate B9":{
+                                "amount":null,
+                                "unit":"mcg",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Vitamin C":{
+                                "amount":null,
+                                "unit":"mg",
+                                "weightGrams":0,
+                                "percentDaily":0
+                            },
+                            "Vitamin E":{
+                                "amount":null,
+                                "unit":"mg",
+                                "weightGrams":0,
+                                "percentDaily":0
+                            },
+                            "Calcium":{
+                                "amount":null,
+                                "unit":"mg",
+                                "weightGrams":0,
+                                "percentDaily":0
+                            },
+                            "Copper":{
+                                "amount":null,
+                                "unit":"mcg",
+                                "weightGrams":null,
+                                "percentDaily":0
+                            },
+                            "Iron":{
+                                "amount":null,
+                                "unit":"mg",
+                                "weightGrams":0,
+                                "percentDaily":0
+                            },
+                            "Phosphorous":{
+                                "amount":null,
+                                "unit":"mg",
+                                "weightGrams":0,
+                                "percentDaily":0
+                            },
+                            "Potassium":{
+                                "amount":null,
+                                "unit":"mg",
+                                "weightGrams":0,
+                                "percentDaily":0
+                            },
+                            "Sodium":{
+                                "amount":"549.37",
+                                "unit":"mg",
+                                "weightGrams":0.54937,
+                                "percentDaily":23
+                            }
+                        },
+                        "isAvailable":1,
+                        "shippingLocations":[
+
+                        ],
+                        "ingredients":[
+                            "Grape 1.39\/lb",
+                            "Organic Wheat Sandwich Thin 6\/6 ea #3438",
+                            "Egg White Patty 3.5\" 160\/1.75 oz #3675766",
+                            "Turkey Breast 2\/9-lb 6109724",
+                            "Cheese Cream  10\/3 lb #5406467",
+                            "Spinach 2.68\/lb",
+                            "Sundried Tomato 5.49\/lb"
+                        ],
+                        "alergens":[
+
+                        ]
+                    }
+                }
+
+## Product Availabilities [/productavailability?key={token}&zipcode={zipcode}&date={date}]
+This API call helps to determine what products are available on given delivery date and location. The `zipcode` parameter is required and is used to find the closest packer facility. For example, if there is a product that is using item SKU that is available on east coast only, west coast customer won't see any products having this SKU as ingredient.
+
+The second, optional, parameter is a delivery date - loaded through shipping days API call. Output will be filtered using both maker and merchant data availability data. If there is a temporary item shortage item any products using this item will be filtered out.
+Merchant will be able to control product availability as well by setting availability date ranges in product configuration screen.
+If the date is empty, API call will return currently available products.
+
+### Products available in the future [GET]
++ Parameters
+    + token (required, string)
+    + zipcode (required, number)
+    + date (optional, string)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1444326323,
+            "data": [
+                "product1",
+                "product2",
+                "product3",
+                "product4",
+                "product5"
+            ]
+        }
+
+## Limit and Offset Example [/products?key={token}&limit={limit}&offset={offset}]
+Retrieving a large list of resources in one request will degrade performance. Use the `limit` and `offset` GET attributes to divide your request into multiple queries. The default value for limit is 100.
+
+### GET
+
++ Parameters
+    + token (required, string)
+    + limit (optional, number, `2`)
+    + offset (optional, number, `1`)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1403221501,
+            "data": [
+                {
+                    "id": "1391",
+                    "itemName": "Turkey, Egg White & Sundried Tomato Breakfast",
+                    "customName": null,
+                    "sku": "",
+                    "gtin": "10826766900005",
+                    "published": "0",
+                    "description": null,
+                    "size": {
+                        "height": "2.26",
+                        "width": "3.71",
+                        "length": "7.61",
+                        "containerId": "1",
+                        "containerName": "Medium Container",
+                        "estimatedVesselLoad": "5",
+                        "slots": "1"
+                    },
+                    "weight": "7.500",
+                    "weightUnit": "oz",
+                    "freshRealmCost": null,
+                    "updateTime": 1402509020,
+                    "categories": [],
+                    "imageUrl": null,
+                    "nutritionInfo": {
+                        "Calories": {
+                            "amount": "285.36",
+                            "unit": "KCal",
+                            "weightGrams": null,
+                            "percentDaily": 15
+                        },
+                        "Fat Calories": {
+                            "amount": "35.86",
+                            "unit": "KCal",
+                            "weightGrams": null,
+                            "percentDaily": 8
+                        },
+                        "Fat": {
+                            "amount": "3.98",
+                            "unit": "g",
+                            "weightGrams": "3.98",
+                            "percentDaily": 7
+                        },
+                        "Saturated Fat": {
+                            "amount": "1.49",
+                            "unit": "g",
+                            "weightGrams": "1.49",
+                            "percentDaily": 8
+                        },
+                        "Polyunsaturated Fat": {
+                            "amount": null,
+                            "unit": "g",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Monounsaturated Fat": {
+                            "amount": null,
+                            "unit": "g",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Trans Fat": {
+                            "amount": "0",
+                            "unit": "g",
+                            "weightGrams": "0",
+                            "percentDaily": 0
+                        },
+                        "Cholesterol": {
+                            "amount": "14.72",
+                            "unit": "mg",
+                            "weightGrams": 0.01472,
+                            "percentDaily": 5
+                        },
+                        "Carbohydrates": {
+                            "amount": "48.07",
+                            "unit": "g",
+                            "weightGrams": "48.07",
+                            "percentDaily": 17
+                        },
+                        "Fiber": {
+                            "amount": "4.12",
+                            "unit": "g",
+                            "weightGrams": "4.12",
+                            "percentDaily": 17
+                        },
+                        "Sugar": {
+                            "amount": "14",
+                            "unit": "g",
+                            "weightGrams": "14",
+                            "percentDaily": 16
+                        },
+                        "Protein": {
+                            "amount": "15.84",
+                            "unit": "g",
+                            "weightGrams": "15.84",
+                            "percentDaily": 32
+                        },
+                        "Vitamin A": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Thiamine B1": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Vitamin B6": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Folate B9": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Vitamin C": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Vitamin E": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Calcium": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Copper": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Iron": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Phosphorous": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Potassium": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Sodium": {
+                            "amount": "549.37",
+                            "unit": "mg",
+                            "weightGrams": 0.54937,
+                            "percentDaily": 23
+                        }
+                    },
+                    "isAvailable": 1,
+                    "shippingLocations": [],
+                    "ingredients": [
+                        "Grape 1.39/lb",
+                        "Organic Wheat Sandwich Thin 6/6 ea #3438",
+                        "Egg White Patty 3.5\" 160/1.75 oz #3675766",
+                        "Turkey Breast 2/9-lb 6109724",
+                        "Cheese Cream    10/3 lb #5406467",
+                        "Spinach 2.68/lb",
+                        "Sundried Tomato 5.49/lb"
+                    ],
+                    "alergens": []
+                },
+                {
+                    "id": "1400",
+                    "itemName": "Ham & Egg Breakfast Sandwich",
+                    "customName": null,
+                    "sku": "",
+                    "gtin": "10826766900012",
+                    "published": "0",
+                    "description": null,
+                    "size": {
+                        "height": "2.26",
+                        "width": "3.71",
+                        "length": "7.61",
+                        "containerId": "1",
+                        "containerName": "Medium Container",
+                        "estimatedVesselLoad": "5"
+                    },
+                    "weight": "8.750",
+                    "weightUnit": "oz",
+                    "freshRealmCost": null,
+                    "updateTime": 1402509020,
+                    "categories": [],
+                    "imageUrl": null,
+                    "nutritionInfo": {
+                        "Calories": {
+                            "amount": "231.67",
+                            "unit": "KCal",
+                            "weightGrams": null,
+                            "percentDaily": 12
+                        },
+                        "Fat Calories": {
+                            "amount": "19",
+                            "unit": "KCal",
+                            "weightGrams": null,
+                            "percentDaily": 4
+                        },
+                        "Fat": {
+                            "amount": "2.11",
+                            "unit": "g",
+                            "weightGrams": "2.11",
+                            "percentDaily": 4
+                        },
+                        "Saturated Fat": {
+                            "amount": "0.15",
+                            "unit": "g",
+                            "weightGrams": "0.15",
+                            "percentDaily": 1
+                        },
+                        "Polyunsaturated Fat": {
+                            "amount": null,
+                            "unit": "g",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Monounsaturated Fat": {
+                            "amount": null,
+                            "unit": "g",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Trans Fat": {
+                            "amount": null,
+                            "unit": "g",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Cholesterol": {
+                            "amount": "7.59",
+                            "unit": "mg",
+                            "weightGrams": 0.00759,
+                            "percentDaily": 3
+                        },
+                        "Carbohydrates": {
+                            "amount": "39.58",
+                            "unit": "g",
+                            "weightGrams": "39.58",
+                            "percentDaily": 14
+                        },
+                        "Fiber": {
+                            "amount": "5.44",
+                            "unit": "g",
+                            "weightGrams": "5.44",
+                            "percentDaily": 22
+                        },
+                        "Sugar": {
+                            "amount": "14.27",
+                            "unit": "g",
+                            "weightGrams": "14.27",
+                            "percentDaily": 16
+                        },
+                        "Protein": {
+                            "amount": "13.24",
+                            "unit": "g",
+                            "weightGrams": "13.24",
+                            "percentDaily": 27
+                        },
+                        "Vitamin A": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Thiamine B1": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Vitamin B6": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Folate B9": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Vitamin C": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Vitamin E": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Calcium": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Copper": {
+                            "amount": null,
+                            "unit": "mcg",
+                            "weightGrams": null,
+                            "percentDaily": 0
+                        },
+                        "Iron": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Phosphorous": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Potassium": {
+                            "amount": null,
+                            "unit": "mg",
+                            "weightGrams": 0,
+                            "percentDaily": 0
+                        },
+                        "Sodium": {
+                            "amount": "497.65",
+                            "unit": "mg",
+                            "weightGrams": 0.49765,
+                            "percentDaily": 21
+                        }
+                    },
+                    "isAvailable": 1,
+                    "shippingLocations": [],
+                    "ingredients": [
+                        "Orange 5-lb",
+                        "Red 88-xf ctn",
+                        "Muffin Whole Wheat English 8/12 oz #77793",
+                        "Egg White Patty 3.5\" 160/1.75 oz #3675766",
+                        "Red Bell",
+                        "Ham Hormel Low Sodium Presliced 6/2 lbs #3133"
+                    ],
+                    "alergens": []
+                }
+            ]
+        }
+
+# Group Availability
+These resources deal with delivery availability. Primarily they require a zip code to be provided.
+
+## Verify Zip Code Availability [/zipcodeavailability?key={token}&zipcode={zipcode}]
+
+Checks to verify if service is available in the requested area.
+
+The returned data includes the ship from zip code for the zip code being shipped to and available shippingMethods if any.
+
+In case the zip code is invalid, system returns the folloging errors with 400 status code:
+
+ * `No zipcode provided` - check the API request `zipcode` attribute
+ * `Not a deliverable zipcode.` - zip code not found in USA zip code database
+ * `You have entered a zip code that is designated as unique (government, university, corporation). We currently do not deliver to these addresses`
+ * `You have entered a PO Box only zip code and we do not ship to PO Boxes. Please try anothe zip code.`
+
+FreshRealm doesn't deliver Porters to PO Box, unique or military type of address.
+
+### Zipcode availability [POST]
+
+
+
++ Parameters
+    + token (required, string)
+    + zipcode (required, integer)
+
+
++ Response 200 (application/json)
+
+        {
+            {
+                "code": 200,
+                "timestamp": 1404146938,
+                "data": {
+                    "available": 1,
+                    "id": "16",
+                    "zipcode": "95828",
+                    "shppingMethods": [
+                        "fedex_ground"
+                    ]
+                }
+            }
+        }
+
+##Get Shipping Days [/shippingdays?key={token}&zipcode={zipcode}]
+
+The number of shipping days to reach the shopper. The limit parameter controls the number of weeks worth of shipping days returned.
+
+The Skip Capacity Check flag defaults to true. When it is set to false, the "isOverCapacity" attribute will be added to each day returned indicating whether or not the day has reached capacity.
+
+###Get all shipping days[GET]
+
++ Parameters
+    + token (required, string)
+    + zipcode (required, integer)
+    + limit (optional, integer)
+    + skipCapacityCheck (optinal, boolean)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1404151616,
+            "data": [
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-03",
+                    "deliveryDate": "2014-07-04",
+                    "cutOffTime": 1404305100,
+                    "isOverCapacity": true
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-07",
+                    "deliveryDate": "2014-07-08",
+                    "cutOffTime": 1404492300,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-10",
+                    "deliveryDate": "2014-07-11",
+                    "cutOffTime": 1404909900,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-14",
+                    "deliveryDate": "2014-07-15",
+                    "cutOffTime": 1405097100,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-17",
+                    "deliveryDate": "2014-07-18",
+                    "cutOffTime": 1405514700,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-21",
+                    "deliveryDate": "2014-07-22",
+                    "cutOffTime": 1405701900
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-24",
+                    "deliveryDate": "2014-07-25",
+                    "cutOffTime": 1406119500,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-28",
+                    "deliveryDate": "2014-07-29",
+                    "cutOffTime": 1406306700,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-07-31",
+                    "deliveryDate": "2014-08-01",
+                    "cutOffTime": 1406724300,
+                    "isOverCapacity": false
+                },
+                {
+                    "locationId": "16",
+                    "shipDate": "2014-08-04",
+                    "deliveryDate": "2014-08-05",
+                    "cutOffTime": 1406911500,
+                    "isOverCapacity": false
+                }
+            ]
+        }
+
+##Get Shipping Week Days [/shippingweekdays?key={token}&zipcode={zipcode}]
+
+The days of the week for which Orders can be delivered for the provided zip code.
+Note that this does not reflect specific delivery dates that are blocked by holidays but is meant to be used to check general availability of a day of week for delivery.
+
+###Get shipping week days[GET]
+
++ Parameters
+    + token (required, string)
+    + zipcode (required, integer)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1404151616,
+            "data": [
+                {
+                    "day": "Sunday",
+                    "available": false,
+                },
+                {
+                    "day": "Monday",
+                    "available": false,
+                },
+                {
+                    "day": "Tuesday",
+                    "available": true,
+                },
+                {
+                    "day": "Wednesday",
+                    "available": false,
+                },
+                {
+                    "day": "Thursday",
+                    "available": true,
+                },
+                {
+                    "day": "Friday",
+                    "available": false,
+                },
+                {
+                    "day": "Saturday",
+                    "available": true,
+                }
+            ]
+        }
+
+#Group Porter Pack
+These resources assist in checking how an order will be packed.
+
+##Pack Products [/packproducts?key={token}&skus={skus}&zipcode={zipcode}&additional={true}&deliveryDate={deliveryDate}]
+
+Get information regarding how a list of product SKUs will be packed for a delivery zip code.
+
+The skus parameter is a JSON encoded list of product SKUs, for example skus=["044512","vegetable-sandwich"].
+The returned data is an array of one or more Porters that would be used to pack the products.
+For each Porter the load attribute is a 0-100 value indicating percent of capacity used.
+The containersInside and containersFree attributes provide information about how many of each container size are packed in the Porter and how many of each container size would still fit.
+
+The additional flag triggers a product lookup that finds what products would fit into the Porter. This functionality is
+mostly used for upsale at a checkout page. Product SKUs returned in the canPackSkus section are the ones
+that fit into the last Porter and are marked as purchasable by the merchant. **Product lookup is an
+expensive operation and might take longer than a regular packProducts call.**
+
+Zip code is used to calculate ice count for the Porter that affects capacity for food. If delivery to provided zip code is not available, system returns 400 error.
+
+Delivery date checks for product availability on given date. The date has to be a valid delivery date obtained from the shipping calendar and all provided products have to be active on that date. Upsale skus are filtered to the ones available on delivery date.
+
+It is highly encouraged to include the delivery date with all pack requests as it can effect the results due to differences in coolant configurations over time in addition to differences in product availability.
+
+Possible 400 error outputs for this call are:
+  * Please provide items as an array of product ids or skus.
+  * Not a deliverable zip code.
+  * Invalid date format. (valid format is yyyy-mm-dd)
+  * Date is too far, availability can be predicted for up to 60 weeks.
+
+###Pack Products [GET]
+
++ Parameters
+    + token (required, string)
+    + skus (required, array)
+    + zipcode (required, string)
+    + additional (optional, boolean)
+    + deliveryDate (optional, string)
+
+
++ Response 200 (application/json)
+
+        {
+          "code": 200,
+          "timestamp": 1446596552,
+          "data": [
+            {
+              "version": 12,
+              "vesselName": "Medium",
+              "vesselType": "2",
+              "coolantInside": 5,
+              "coolantNeeded": "5",
+              "itemsInside": 2,
+              "flatCoolantInside": 2,
+              "notchesUsed": 5,
+              "drawerCount": 5,
+              "freeDrawers": 0,
+              "load": 10,
+              "totalWeight": 33.56875,
+              "emptyWeight": 27.35,
+              "containersInside": {
+                "1": 2
+              },
+              "containersFree": {
+                "1": 18,
+                "2": 9,
+                "4": 36,
+                "5": 13,
+                "6": 4,
+                "7": 36,
+                "8": 13,
+                "9": 13
+              },
+              "drawers": [
+                {
+                  "vesselNotchNumber": 1,
+                  "number": 1,
+                  "items": [],
+                  "coolants": [
+                    {
+                      "itemId": 720
+                    }
+                  ]
+                },
+                {
+                  "vesselNotchNumber": 2,
+                  "number": 2,
+                  "items": [],
+                  "coolants": [
+                    {
+                      "itemId": 720
+                    }
+                  ]
+                },
+                {
+                  "vesselNotchNumber": 3,
+                  "number": 3,
+                  "items": [],
+                  "coolants": [
+                    {
+                      "itemId": 720
+                    }
+                  ]
+                },
+                {
+                  "vesselNotchNumber": 4,
+                  "number": 4,
+                  "items": [],
+                  "coolants": [
+                    {
+                      "itemId": 720
+                    }
+                  ]
+                },
+                {
+                  "vesselNotchNumber": 5,
+                  "number": 5,
+                  "items": [
+                    {
+                      "itemId": "2144",
+                      "orderId": null,
+                      "codropLabel": "",
+                      "description": "MP Half Ham Sandwich with Fruit & Carrots",
+                      "groupId": "1067-0",
+                      "productId": null,
+                      "orderItemId": null,
+                      "mealSticker": null,
+                      "prePrintedSticker": ""
+                    },
+                    {
+                      "itemId": "2139",
+                      "orderId": null,
+                      "codropLabel": "",
+                      "description": "MP Ka-POWer Greens 7.75oz",
+                      "groupId": "1072-1",
+                      "productId": null,
+                      "orderItemId": null,
+                      "mealSticker": null,
+                      "prePrintedSticker": ""
+                    }
+                  ],
+                  "coolants": [
+                    {
+                      "itemId": 720
+                    }
+                  ]
+                }
+              ],
+              "canPackSkus": [
+                "FRM-HAMSNDWCH-1",
+                "FRM-APPLEDIPPERS-1",
+                "FRM-COBBSALAD-1",
+                "FRM-SANTAFESALAD-1",
+                "FRM-KALESALAD-1",
+                "FRM-CAESARSALAD-1",
+                "FRM-ASIANSALAD-1",
+                "FRM-TURKEYSNDWCH-1"
+              ],
+              "packIns": []
+            }
+          ]
+        }
+
+
+# Group Orders
+
+## Place An Order [/orders]
+To create an order, you must create customer and address resources first. FRC validates deliverability to shipping address, product and date availability. There are four different statuses that can be used to send order
+data:
+
+ * `authorized` - Order will be processed by FRC once it passes its cut off time
+ * `test` - Order will be validated by FRC, but not stored. Api returns 200 status code if order can be fullfiled. This is an alternative to preliminary / authorized workflow.
+ * `cancelled` - Order won't be processed by FRC. See "Cancel Order API call"
+
+|status | description |
+|------|-------------|
+|`authorized` | authorized transactions |
+|`processed` | submitted to food makers |
+|`in_transit`| orders in transit |
+|`at_customer`| Porter is with the customer and waiting for pickup |
+|`cancelled` | cancelled order |
+|`in_transit_back` | Porter is on its way back to the facility  |
+|`vessel_returned` | Porter has been returned back to the facility|
+
+### Attributes
+| field           | Can Edit | description |
+|-----------------------|-----------|---------------------------------------|
+| `id`            |  | FreshRealm Order Id |
+| `customerId` | X |  Customer Id, see `Customers` resource |
+| `codropId` | X |  Codrop Id, see `codrop` resource  |
+| `shippingAddressId` | X |  Shipping Address Id |
+| `status` | X |  One of the following: `preliminary`, `authorized`, `processed`, `in_transit`, `at_customer`, `cancelled`, `in_transit_back, `vessel_returned` |
+| `manufactureDate` |  |  Manufacture Date for the order |
+| `freshrealmSubtotal` |  |  Freshrealm total cost |
+| `shippingAndHandling` |  |  Shipping and Handling charges for the order |
+| `cutoffTime` |  |  cutoff time to accept order |
+| `totalCost` |  |  total cost for the order |
+| `totalPrice` | X |  total price including Shipping and Handling |
+| `salesTax` | X |  sales tax for the order |
+| `updateTime` |  | update time for the order |
+| `createTime` |  |  Create time when the order was created |
+| `orderNumber` | X |  merchant's order number provided by e-commerce platform  |
+| `deliveryDate` | X |  delivery date for the order |
+| `items` | X | list of all items in the order |
+| `pickupDate` | X |  pickup date for the order|
+| `shipMethod` | X* |  ship method for the order |
+| `warnings` |  |  any warnings or instructions for unexpected scenarios |
+| `transactionId` | X |  transaction id from merchant services provider |
+| `trackingNumber` |  |  Porter tracking number |
+| `customData` |  |  Key value pairs of data associated with the order |
+| `subscriptionId` | X |  merchant's subscription id if order is part of subscription |
+| `subscriptionTemplateId` | X |  merchant's subscription template id if order is part of a subscription with a fixed product template |
+| `confirmationNumber` |   | Confirmation number is generated once order is authorized. It is 12 digit numerical code. |
+| `replaceOrderId` | X | When order updates are done through canceling old orders and placing new one, provide FreshRealm order id of canceled order to keep all modified orders in the same group. |
+| `modifiedItems` |   | Contains list of food items that have been removed or replaced during fullfilment stage. Missing item: {sku, productName, upc, itemName, status: 'missing'}, replaced item: {sku, productName, upc, itemName, originalItemName, originalUpc, staus: 'replaced'}|
+| `shippingTierId` |   | Shipping tier that indirectly coresponds to shipping zone from shipper to support different pricing models on shipping charge. Zone is estimated based on distance between pack facility and customer location. This is auto increment number. |
+| `shippingTierName` |   | Description of shipping tier |
+| `shippingTierNumber` |   | Lower shipping tiers are closer to customer |
+| `packingFacility`   |    | Food packer - "SAC" or "NJ"  |
+| `checkPurchasable`  |    | Flag (values 0,1) to check that all products in order are available on delivery date. Set to "1" by default. |
+ \*ship method can not be edited once created.
+
+#### Items Attributes
+| field | required  | type      | example                           | description |
+|---------------|:-:|-----------|-----------------------------------|-------------|
+| `sku`          | * | string       | `1`                               | Merchant SKU number |
+| `quantity`    | * | int       | `1`                               | Quantity |
+
+Products should be ordered by SKU.  The SKU can be modified on FRC merchant pages.
+
+### Place An Order [POST]
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "status": "authorized",
+                "customerId": 7069,
+                "shippingAddressId": 7427,
+                "items": [{
+                    "sku": "1674",
+                    "quantity": 3
+                },{
+                    "sku": "1675",
+                    "quantity": 4
+                }],
+                "totalPrice": "20.98",
+                "salesTax": "0",
+                "deliveryDate": "2014-06-01",
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1401213818,
+            "data": {
+                "id": "10489",
+                "customerId": "7069",
+                "codropId": null,
+                "shippingAddressId": "7427",
+                "status": "authorized",
+                "manufactureDate": "2014-06-02",
+                "freshrealmSubtotal": 4.05,
+                "shippingAndHandling": 30.79182,
+                "cutOffTime": "2014-05-30 17:00",
+                "totalCost": 34.84182,
+                "totalPrice": "20.98",
+                "salesTax": "0",
+                "updateTime": 1401213818,
+                "createTime": 1401213818,
+                "orderNumber": null,
+                "deliveryDate": "2014-06-02",
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+                ],
+                "pickupDate": null,
+                "shipMethod": "FEDEX_GROUND",
+                "warnings": [
+                    {
+                        "type": "modifiedDeliveryDate",
+                        "message": "Delivery date was modified"
+                    }
+                ]
+            }
+        }
+
+## List Orders [/orders?key={token}&limit={limit}]
+
+Retrieve all the latest orders (default limit is 100 results)
+
+### List Orders [GET]
++ Parameters
+    + token (required, string)
+    + limit (optional, number, `3`)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1401213818,
+            "data": [{
+                "id": "10489",
+                "customerId": "7069",
+                "codropId": null,
+                "shippingAddressId": "7427",
+                "status": "authorized",
+                "manufactureDate": "2014-06-02",
+                "freshrealmSubtotal": 4.05,
+                "shippingAndHandling": 30.79182,
+                "cutOffTime": "2014-05-30 17:00",
+                "totalCost": 34.84182,
+                "totalPrice": "20.98",
+                "salesTax": "0",
+                "updateTime": 1401213818,
+                "createTime": 1401213818,
+                "orderNumber": null,
+                "deliveryDate": "2014-06-02",
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+                ],
+                "pickupDate": null,
+                "shipMethod": "FEDEX_GROUND"
+            },{
+                "id": "10490",
+                "customerId": "7069",
+                "codropId": null,
+                "shippingAddressId": "7427",
+                "status": "authorized",
+                "manufactureDate": "2014-06-02",
+                "freshrealmSubtotal": 4.05,
+                "shippingAndHandling": 30.79182,
+                "cutOffTime": "2014-05-30 17:00",
+                "totalCost": 34.84182,
+                "totalPrice": "20.98",
+                "salesTax": "0",
+                "updateTime": 1401213818,
+                "createTime": 1401213818,
+                "orderNumber": null,
+                "deliveryDate": "2014-06-02",
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+                ],
+                "pickupDate": null,
+                "shipMethod": "FEDEX_GROUND"
+            },{
+                "id": "10491",
+                "customerId": "7069",
+                "codropId": null,
+                "shippingAddressId": "7427",
+                "status": "authorized",
+                "manufactureDate": "2014-06-02",
+                "freshrealmSubtotal": 4.05,
+                "shippingAndHandling": 30.79182,
+                "cutOffTime": "2014-05-30 17:00",
+                "totalCost": 34.84182,
+                "totalPrice": "20.98",
+                "salesTax": "0",
+                "updateTime": 1401213818,
+                "createTime": 1401213818,
+                "orderNumber": null,
+                "deliveryDate": "2014-06-02",
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+                ],
+                "pickupDate": null,
+                "shipMethod": "FEDEX_GROUND"
+            }]
+        }
+
+## Order Resource [/orders/{orderId}?key={token}]
+Use this URL to `GET` order information or `PUT` changes to the order.
+
+### Fetch Order [GET]
++ Parameters
+    + orderId (required, number, `10490`)
+    + token (required, string)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1402706999
+            "data": {
+                "id": "10490",
+                "customerId": "7069",
+                "codropId": null,
+                "shippingAddressId": "7427",
+                "status": "authorized",
+                "manufactureDate": "2014-06-02",
+                "freshrealmSubtotal": 4.05,
+                "shippingAndHandling": 30.79182,
+                "cutOffTime": "2014-05-30 17:00",
+                "totalCost": 34.84182,
+                "totalPrice": "20.98",
+                "salesTax": "0",
+                "updateTime": 1401213818,
+                "createTime": 1401213818,
+                "orderNumber": null,
+                "deliveryDate": "2014-06-02",
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+                ],
+                "pickupDate": null,
+                "shipMethod": "fedex_ground"
+            }
+        }
+
+### Update Delivery Date [PUT]
+Have order delivered on different date than originally submitted. Delivery date change can be executed before cut off time of old and new delivery date. Use dates from availability calendar as input to this API call.
+If delivery date is not available server returns 400 error.
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "deliveryDate": "2015-03-14",
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data": {
+                "id":109,
+                "deliveryDate": "2015-03-14",
+            }
+        }
+
+### Update Delivery Address [PUT]
+Delivery address can be updated after cut off time and before shipping label is printed. Address can be changed as long as the shipping service stays the same. For example, it is not possible to update address from California to New York if Porter is supposed to be delivered by ground service. It is possible to change ground regions as long as the change is performed before cut off time for both zones. Zone change might create
+new cut off time.
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "shippingAddressId": "79920",
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data": {
+                "id":109,
+                "shippingAddressId": "79920",
+            }
+        }
+
+### Update Products [PUT]
+Customer can swap items on order before cut off time. If swap is performed, merchant is responsible for differences in food price. Swaps can be executed before cut off time, but cut off time might be updated as well. This operation accepts full final set of products after swap. It is recommended to use `vesselLoad` API call to make sure item change won't result into use of additional Porter.
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data": {
+                "id":109,
+                "items": [
+                    {
+                        "sku": "1674",
+                        "quantity": 3
+                    },
+                    {
+                        "sku": "1675",
+                        "quantity": 4
+                    }
+                ],
+            }
+        }
+
+### Update Status [PUT]
+Order can be canceled through status updated. Supported input values for status update are `preliminary`, `authorized`, and `cancelled`. Preliminary order will be canceled if it is not updated to `authorized` before cut off time.
+
+## Cancel an Order [/orders/cancel/{orderId}?key={token}]
+
+### Cancel an Order [PUT]
+Order can be typically canceled before cut off time with no consequences. API supports cancels after cut off time for approved merchants. Merchant is billed for ordered food and handling fees for orders canceled after cut off time, but not for shipping fee. Order can be canceled up to the moment before shipping label is printed, which is a day before delivery.
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data": {
+                "id":109,
+                "status": "cancelled",
+                "cancelRequestDetail": {
+                    "id" => 54114,
+                    "reason" => "API test",
+                    "event" => "Canceled after cut off time",
+                    "cancelTime" => "2015-03-25 17:33:39"
+                    "source" => "api"
+                }
+            }
+        }
+
+## Reschedule Pickup [/orders/reschedulepickup/{orderId}?key={token}]
+Carrier pickup is typically scheduled the next business day after delivery. FRC will reschedule Porter pickup twice after first unsuccessful attempt. This API call allows user to delay Porter pickup for up to one week. Old pickup request is canceled automatically and new pickup request is created. Even though pickup request is scheduled for order, in practice it is for pickup address and date. Carrier will pickup all Porters from all customers waiting at the pickup address.
+
+Pickup requests can be scheduled a maximum of 7 days in advanced and must be scheduled for after the delivery date of the order.
+
+Pickup address id can be optionally passed into this call to change pickup location.  If pickup can not be scheduled for the requested date it will be scheduled for the next available date.
+
+
+### Reschedule For Different Date [PUT]
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "date": "2015-03-14"
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data": {
+                "orderId":109,
+                "addressId": "1154",
+                "date" => "2015-03-14"
+            }
+        }
+
+
+### Reschedule For Different Address [PUT]
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Request (application/json)
+
+    + Body
+
+            {
+                "addressId": "1154"
+            }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data": {
+                "orderId":109,
+                "addressId": "1154",
+                "date" => "2015-03-14"
+            }
+        }
+
+## Create Shipping Label [/orders/createshippinglabel/{orderId}?key={token}]
+
+Create new return shipping labels for all of the Porters used by an order.  This method returns an array of tracking numbers for the newly created shipping label(s) which can be used with the Shipping Label Download method to retrieve a PDF of the shipping label.
+
+### Create Shipping Label [GET]
+
++ Parameters
+    + orderId (required, number, `109`)
+    + token (required, string)
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1430512169,
+            "data": [
+                "99998458496"
+            ]
+        }
+
+## Shipping Label Download [/orders/shippinglabeldownload/{trackingNumber}?key={token}]
+
+Download a shipping label created with the Create Shipping Label method.  Shipping labels are PDF documents in letter format.
+
+### Shipping Label Download [GET]
+
++ Parameters
+    + trackingNumber (required, string, `99998458496`)
+    + token (required, string)
+
++ Response 200 (application/octet-stream)
+
+        *BINARY DATA*
+
+# Group Customers
+
+This operation can be used to find a customer and to get all the orders for the customer.
+
+|Field                      |Can edit        |Description |
+|---------------------------|---------------|------------|
+|id                         |            |FreshRealm customer id |
+|myCustomerID               |    X        |The external customer id (customer id set by customers of FreshRealm) |
+|firstName                  |    X       |First name of customer |
+|lastName                   |    X       |Last name of customer |
+|email                      |    X       |Email Address |
+|phoneNumber                |    X       |Phone Number |
+|mobilePhoneNumber          |    X       |Mobile Phone Number |
+|isAccountActive            |            |is customer Active |
+|address                    |    X*       |List of the latest shipping address |
+|emailVerified              |    X       |Email Address is verified|
+|extraAttributes            |    X       |All other attributes related to the customer |
+|addresses                  |            |List of all the shipping addresses |
+
+  \*cannot be edited once created
+
+## Create new Customer with address [/customers?key={token}]
+
+### Create new Customer with address[POST]
+
++ Parameters
+    + token (required, string)
+
++ Request (application/json)
+
+        {  "firstName": "Mark",
+            "lastName": "Zuckeberg",
+            "email": "zuckeberg@freshrealm.co",
+            "mobilePhoneNumber": "888-457-4547",
+            "address": {
+                    "streetAndNumber": "139 Wall St",
+                    "aptSuite": "H",
+                    "city": "Ventura",
+                    "state": "CA",
+                    "zipcode": "93001"
+                }
+        }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1377020859,
+            "data":
+            {
+            "firstName": "Mark",
+            "lastName": "Zuckeberg",
+            "email": "zuckeberg@freshrealm.co",
+            "mobilePhoneNumber": "888-457-4547",
+            "address": {
+                    "streetAndNumber": "139 Wall St",
+                    "aptSuite": "H",
+                    "city": "Ventura",
+                    "state": "CA",
+                    "zipcode": "93001"
+                }
+            }
+        }
+
+# Group Addresses
+
+List of all shopper addresses. Shoppers have ability to update their shipping preferences on FRC shopper pages. Periodic address synchronization ensures that address on e-commerce platform is the same as the one in FRC.
+
+|Field                      |Can edit        |Description |
+|---------------------------|---------------|------------|
+|`phoneNumber`            | X*  |Recipient phone number |
+|`fullName`            | X*  |Recipient name |
+|`prefix`            | X  |Address Prefix |
+|`streetAndNumber`   |  X* |Example: 476 Main St       |
+|`aptSuite`          | X  |Apartment number, unit number or suite. Example: Unit A        |
+|`city`              | X  |City name      |
+|`state`             | X  |State name - Example: CA or California     |
+|`zipcode`           | X*  |Zip code - Example: 93001     |
+|`deliveryInstructions`| X |Special Delivery Instructions     |
+|`pickupInstuctions` |  X | Pickup instructions for return of Porter |
+|`pickupLocation` |  X |Pickup location for the Porter    |
+|`type`           |  X |Residntial or Commercial    |
+|`verifyShipper`  | X  |Set to `1` to run validation against address database. This extra validation can catch incorrect zip code or house number. Use this feature to make sure that the package will be delivered to the right address. |
+|`id`             |   |Address ID      |
+|`customerId`     |  X* |id of the customer      |
+|`status`         |   |FRC is using external data source for address validation. Possible values are: `confirmed`, `missing_secondary`, `wrong_secondary`. Missing or wrong secondary means that apartment number is incorrect. Shipment still might be delivered (to apartment office for example), but there is a chance that carrier won't be able to find the right unit.|
+|`lat`            |   |Latitude of the customer address|
+|`lng`            |   |Longitude of the customer address     |
+|`shippingLocation`  |    |Shipping Location of the facility  |
+|`uniqueIdentifier` |    |Unique Identifier for the address    |
+|`updateTime`      |    |Update time for the last address update |
+|`override`       |     |Skip delivery validation. Use this feature only after regular create address call fails. Customer can be offered option to proceed with not validated address with lower chance that Porter will be delivered.  |
+
+    \*Required
+
+## Validation [/addresses/verify?key={token}]
+
+###POST
+
+Address is validated against USPS and FedEx database for deliverability. Minor errors such as type on street name or city will be corrected automatically. Under no circumstances is the address saved. If any required fields are missing, the API will return a status of 400 and a message specifying the missing required fields.
+
++ Parameters
+    + token (required, string)
+
++ Request (application/json)
+
+        {
+            "prefix": "FreshRealm",
+            "phoneNumber": "8050000000",
+            "fullName": "HR department",
+            "streetAndNumber": "476 E Main St",
+            "state": "CA",
+            "zipcode": "93001",
+            "deliveryInstructions": "Ring the bell",
+            "pickupInstructions": "Ring the bell",
+            "pickupLocation": "front_door",
+        }
+
++ Response 200 (application/json)
+
+        {
+            "code": 200,
+            "timestamp": 1503531209,
+            "data": {
+                "prefix": "FreshRealm",
+                "streetAndNumber": "476 E Main St",
+                "aptSuite": null,
+                "city": null,
+                "state": "CA",
+                "zipcode": "93001",
+                "deliveryInstructions": "Ring the bell",
+                "pickupInstructions": "Ring the bell",
+                "pickupLocation": "front_door",
+                "type": "476-E-MAIN-ST-93001-93001-CA",
+                "phoneNumber": "8050000000",
+                "fullName": "HR department",
+                "isDefault": null,
+                "status": "not_validated",
+                "lat": null,
+                "lng": null,
+                "shippingLocation": {
+                    "id": "16",
+                    "zipcode": "95824",
+                    "shipper": "fedex"
+                },
+                "uniqueIdentifier": "476-E-MAIN-ST-93001-93001-CA"
+            }
+        }
+
++ Request (application/json)
+
+        {
+            "prefix": "FreshRealm",
+            "phoneNumber": "8050000000",
+            "fullName": "HR department",
+            "streetAndNumber": "476 E Main St",
+            "deliveryInstructions": "Ring the bell",
+            "pickupInstructions": "Ring the bell",
+            "pickupLocation": "front_door"
+        }
+
++ Response 400 (application/json)
+
+        {
+            "code": 400,
+            "timestamp": 1503531393,
+            "data": {
+                "message": "Zipcode cannot be blank. Invalid state code "
+            }
+        }
+
+## Operations [/addresses?key={token}]
+
+###GET
+
++ Parameters
+    + token (required, string)
+
++ Response 200 (application/json)
+
+        {
+           "code": 200,
+           "timestamp": 1401126092,
+           "data": [
+                {
+                   "id": 11554512,
+                   "prefix": "FreshRealm",
+                   "phoneNumber": "8050000000",
+                   "fullName": "HR department",
+                   "streetAndNumber": "476 E Main St",
+                   "aptSuite": "",
+                   "city": "Ventura",
+                   "state": "CA",
+                   "zipcode": "93001",
+                   "deliveryInstructions": "Ring the bell",
+                   "pickupInstructions": "Ring the bell",
+                   "pickupLocation": "front_door",
+                   "type": "commercial",
+                   "status": "confirmed",
+                   "lat": "34.28329",
+                   "lng": "-119.29941",
+                   "shippingLocation" : "null",
+                   "uniqueIdentifier": "476-E-MAIN-ST-VENTURA-CA"
+                }
+            ]
+        }
+
+### POST
+
+Address is validated against USPS and FedEx database for deliverability. Minor errors such as type on street name or city will be corrected automatically.
+
++ Parameters
+    + token (required, string)
+
++ Request (application/json)
+
+        {
+            "prefix": "FreshRealm",
+            "phoneNumber": "8050000000",
+            "fullName": "HR department",
+            "streetAndNumber": "476 E Main St",
+            "zipcode": "93001",
+            "deliveryInstructions": "Ring the bell",
+            "pickupInstructions": "Ring the bell",
+            "pickupLocation": "front_door",
+        }
+
++ Response 200 (application/json)
+
+        {
+           "code": 200,
+           "timestamp": 1401126092,
+           "data": {
+                   "id": 11554512,
+                   "prefix": "FreshRealm",
+                   "streetAndNumber": "476 E Main St",
+                   "aptSuite": "",
+                   "city": "Ventura",
+                   "phoneNumber": "8050000000",
+                   "fullName": "HR department",
+                   "state": "CA",
+                   "zipcode": "93001",
+                   "deliveryInstructions": "Ring the bell",
+                   "pickupInstructions": "Ring the bell",
+                   "pickupLocation": "front_door",
+                   "type": "commercial",
+                   "status": "confirmed",
+                   "lat": "34.28329",
+                   "lng": "-119.29941",
+                   "shippingLocation" : "null",
+                   "uniqueIdentifier": "476-E-MAIN-ST-VENTURA-CA"
+                }
+        }
+
+#Group Events
+
+Event API is read only stream of events for all orders. Order status is updated with certain events, but it does not reflect all possible states. The events API should be checked for new events periodically and frequently.  The timestamp returned with each request should always be used with the next request to only retrieve new events.
+
+| Event # | Name | Description | Type |
+|-------|--------|-------------|------|
+| 1000 | Created |  | Order |
+| 1100 | Updated |  | Order |
+| 1120 | Item Updated |  | Order |
+| 1130 | Delivery address updated | Order will be shipped to new address. | Order |
+| 1140 | Delivery date updated | Order delivery date changed. | Order |
+| 1200 | Connected to shipment |  | Order |
+| 1300 | Connected to purchase order | Order was added to purchase order | Order |
+| 1400 | Issue reported | Food shipment or Porter issue reported by merchant or customer | Order |
+| 1500 | Canceled before cut off time | Order was canceled before food was ordered from supplier. | Order |
+| 1600 | Canceled after cut off time | Order was canceled after food was ordered from supplier but before the Porter was shipped. | Order |
+| 1620 | Canceled after cut off time by FreshRealm | Order was not supposed to ship - requested by FreshRealm Ops Team merchant will not be charged. | Order |
+| 1700 | Canceled after ship | Order was canceled after shipper took the Porter. Shipper has to be contacted and Porter will return full. | Order |
+| 5000 | Finalized | There are no updates allowed after finalization step. | Order |
+| 8000 | Created | Porter shipment created | Vessel |
+| 8010 | Updated | Porter shipment updated | Vessel |
+| 8020 | Canceled | Porter shipment canceled | Vessel |
+| 8040 | Finalized | Porter shipment finalized | Vessel |
+| 8050 | Downloaded | Downloaded by Packer | Vessel |
+| 8100 | Released | The Porter was assembled and packed. | Vessel |
+| 8200 | Packed | The Porter was assembled and packed. | Vessel |
+| 8300 | Shipping label printed | Weight was submitted to server and shipping label obtained from shipper. | Vessel |
+| 8400 | Reported not shipped | Porter didn't leave packer facility. | Vessel |
+| 10000 | Shipped to zone skip | The Porter was given to zone skip driver. | Vessel |
+| 10100 | Delivered to zone skip | The Porter was delivered to cold storage. | Vessel |
+| 10200 | Delivered to shipper | Shipper obtained the Porter but system does not have confirmation yet. | Vessel |
+| 10300 | Tendered to shipper | Shipper confirmed Porter pickup by sending email or edi message. | Vessel |
+| 10400 | Delivery exception | Shipper could not deliver the Porter. | Vessel |
+| 10500 | Delivered to customer | Shipper confirmed delivery to customer. | Vessel |
+| 10600 | Reprinted return label | Shopper printed custom return shipping label. | Vessel |
+| 10700 | Shipped back | Shipper confirmed pickup. | Vessel |
+| 10750 | Shipped back using outbound label | Non-peeled outbound label was used for pickup at customer. | Vessel |
+| 10770 | Shipped back using outbound label | Non-peeled outbound label was used for pickup at customer. | Vessel |
+| 10800 | Returned to packer | Shipper confirmed delivery to packer facility. Lost Porter fee will not be charged. | Vessel |
+| 10900 | Received by packer | Packer confirmed the Porter delivery. | Vessel |
+| 11000 | Reported stolen | Shipper didn't receive the Porter and customer does not have it either. | Vessel |
+| 11100 | Reported lost | Stolen or lost shipping label. | Vessel |
+| 11150 | Reported not returned | Porter was gifted or sold to customer. | Vessel |
+| 11200 | Reported issue | Customer or merchant reported order or Porter issue. | Vessel |
+| 11300 | Lost Vessel Fee | Lost Porter fee has been charged. | Vessel |
+| 60000 | Created | Pickup request created | Pickup |
+| 60100 | Removed | Pickup request removed | Pickup |
+| 60200 | Scheduled | Pickup scheduled | Pickup |
+| 60300 | Canceled | Pickup canceled | Pickup |
+| 60400 | Missed | Pickup missed | Pickup |
+| 60500 | Rescheduled | Pickup rescheduled | Pickup |
+| 60600 | Picked Up | Picked Up | Pickup |
+
+## List Events [/events?key={token}]
+###Get All Events[GET]
+
++ Parameters
+    + token (required, string)
+    + limit (optional, integer)
+    + timestamp (optional, string)
+
++ Response 200 (application/json)
+
+    {
+      "code": 200,
+      "timestamp": 1427468187,
+      "data": [
+        {
+          "id": "618eb9fa1b9f094e09ff7ead3681bd52",
+          "event": "8200",
+          "type": "Vessel",
+          "name": "Packed",
+          "createTime": "2013-12-18 00:00:00",
+          "orderId": "62"
+        },
+        {
+          "id": "9059f337e5c76d906696fcf2434007e4",
+          "event": "8300",
+          "type": "Vessel",
+          "name": "Shipping label printed",
+          "createTime": "2013-12-18 00:00:00",
+          "orderId": "62"
+        },
+        {
+          "id": "339b6fcce0c8b739278d61bde52936d2",
+          "event": "8200",
+          "type": "Vessel",
+          "name": "Packed",
+          "createTime": "2013-12-19 00:00:00",
+          "orderId": "63"
+        }
+      ]
+    }
