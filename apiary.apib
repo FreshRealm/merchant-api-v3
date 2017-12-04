@@ -165,8 +165,6 @@ The following table describes which attributes are provided by default, and whic
 | `weightUnit`            |        | Unit of weight used e.g. lb, oz, etc. |
 | `itemType`            |        | Either `product` or `meal_plan` |
 | `freshRealmCost`        |        | FreshRealm Cost |
-| `categories`            |    X      | List of categories - categories will be deprecated soon. Use tags instead. |
-| `tagGroups`            |     X      | Each product can be assigned to multiple groups with different tags inside. Groups can be used for navigation or categories. Groups have following structure: groupId => [tag1Id, tag2Id] |
 | `updateTime`            |           | Time of last update |
 | `imageUrl`              |           | Default image url in the full resolution |
 | `nutritionInfo`         |        | Nutritional information for a product. Included by default if individual product is requested but not when list of products is requested |
@@ -1271,12 +1269,12 @@ Possible 400 error outputs for this call are:
 # Group Orders
 
 ## Place An Order [/orders]
-To create an order, you must create customer and address resources first. FRC validates deliverability to shipping address, product and date availability. There are four different statuses that can be used to send order
+To create an order, you must create customer and address resources first. FreshRealm validates deliverability to shipping address, product and date availability. There are four different statuses that can be used to send order
 data:
 
- * `authorized` - Order will be processed by FRC once it passes its cut off time
- * `test` - Order will be validated by FRC, but not stored. Api returns 200 status code if order can be fullfiled. This is an alternative to preliminary / authorized workflow.
- * `cancelled` - Order won't be processed by FRC. See "Cancel Order API call"
+ * `authorized` - Order will be processed by FreshRealm once it passes its cut off time
+ * `test` - Order will be validated by FreshRealm, but not created. Api returns 200 status code if order can be fullfiled.
+ * `cancelled` - Order won't be processed by FreshRealm. See "Cancel Order API call"
 
 |status | description |
 |------|-------------|
@@ -1295,7 +1293,7 @@ data:
 | `customerId` | X |  Customer Id, see `Customers` resource |
 | `codropId` | X |  Codrop Id, see `codrop` resource  |
 | `shippingAddressId` | X |  Shipping Address Id |
-| `status` | X |  One of the following: `preliminary`, `authorized`, `processed`, `in_transit`, `at_customer`, `cancelled`, `in_transit_back, `vessel_returned` |
+| `status` | X |  One of the following: `authorized`, `processed`, `in_transit`, `at_customer`, `cancelled`, `in_transit_back, `vessel_returned` |
 | `manufactureDate` |  |  Manufacture Date for the order |
 | `freshrealmSubtotal` |  |  Freshrealm total cost |
 | `shippingAndHandling` |  |  Shipping and Handling charges for the order |
@@ -1332,7 +1330,7 @@ data:
 | `sku`          | * | string       | `1`                               | Merchant SKU number |
 | `quantity`    | * | int       | `1`                               | Quantity |
 
-Products should be ordered by SKU.  The SKU can be modified on FRC merchant pages.
+Products should be ordered by SKU.  The SKU can be modified by contacting FreshRealm Customer Service.
 
 ### Place An Order [POST]
 
@@ -1646,7 +1644,7 @@ Customer can swap items on order before cut off time. If swap is performed, merc
         }
 
 ### Update Status [PUT]
-Order can be canceled through status updated. Supported input values for status update are `preliminary`, `authorized`, and `cancelled`. Preliminary order will be canceled if it is not updated to `authorized` before cut off time.
+Order can be canceled through status updated. Supported input values for status update are `authorized`, and `cancelled`.
 
 ## Cancel an Order [/orders/cancel/{orderId}?key={token}]
 
@@ -1676,7 +1674,7 @@ Order can be typically canceled before cut off time with no consequences. API su
         }
 
 ## Reschedule Pickup [/orders/reschedulepickup/{orderId}?key={token}]
-Carrier pickup is typically scheduled the next business day after delivery. FRC will reschedule Porter pickup twice after first unsuccessful attempt. This API call allows user to delay Porter pickup for up to one week. Old pickup request is canceled automatically and new pickup request is created. Even though pickup request is scheduled for order, in practice it is for pickup address and date. Carrier will pickup all Porters from all customers waiting at the pickup address.
+Carrier pickup is typically scheduled the next business day after delivery. FreshRealm will reschedule Porter pickup twice after first unsuccessful attempt. This API call allows user to delay Porter pickup for up to one week. Old pickup request is canceled automatically and new pickup request is created. Even though pickup request is scheduled for order, in practice it is for pickup address and date. Carrier will pickup all Porters from all customers waiting at the pickup address.
 
 Pickup requests can be scheduled a maximum of 7 days in advanced and must be scheduled for after the delivery date of the order.
 
@@ -1836,7 +1834,7 @@ This operation can be used to find a customer and to get all the orders for the 
 
 # Group Addresses
 
-List of all shopper addresses. Shoppers have ability to update their shipping preferences on FRC shopper pages. Periodic address synchronization ensures that address on e-commerce platform is the same as the one in FRC.
+List of all shopper addresses. Periodic address synchronization ensures that address on e-commerce platform is the same as the one in FreshRealm's records.
 
 |Field                      |Can edit        |Description |
 |---------------------------|---------------|------------|
@@ -1855,7 +1853,7 @@ List of all shopper addresses. Shoppers have ability to update their shipping pr
 |`verifyShipper`  | X  |Set to `1` to run validation against address database. This extra validation can catch incorrect zip code or house number. Use this feature to make sure that the package will be delivered to the right address. |
 |`id`             |   |Address ID      |
 |`customerId`     |  X* |id of the customer      |
-|`status`         |   |FRC is using external data source for address validation. Possible values are: `confirmed`, `missing_secondary`, `wrong_secondary`. Missing or wrong secondary means that apartment number is incorrect. Shipment still might be delivered (to apartment office for example), but there is a chance that carrier won't be able to find the right unit.|
+|`status`         |   |FreshRealm is using external data source for address validation. Possible values are: `confirmed`, `missing_secondary`, `wrong_secondary`. Missing or wrong secondary means that apartment number is incorrect. Shipment still might be delivered (to apartment office for example), but there is a chance that carrier won't be able to find the right unit.|
 |`lat`            |   |Latitude of the customer address|
 |`lng`            |   |Longitude of the customer address     |
 |`shippingLocation`  |    |Shipping Location of the facility  |
@@ -2032,45 +2030,15 @@ Event API is read only stream of events for all orders. Order status is updated 
 |-------|--------|-------------|------|
 | 1000 | Created |  | Order |
 | 1100 | Updated |  | Order |
-| 1120 | Item Updated |  | Order |
 | 1130 | Delivery address updated | Order will be shipped to new address. | Order |
 | 1140 | Delivery date updated | Order delivery date changed. | Order |
-| 1200 | Connected to shipment |  | Order |
-| 1300 | Connected to purchase order | Order was added to purchase order | Order |
-| 1400 | Issue reported | Food shipment or Porter issue reported by merchant or customer | Order |
 | 1500 | Canceled before cut off time | Order was canceled before food was ordered from supplier. | Order |
-| 1600 | Canceled after cut off time | Order was canceled after food was ordered from supplier but before the Porter was shipped. | Order |
-| 1620 | Canceled after cut off time by FreshRealm | Order was not supposed to ship - requested by FreshRealm Ops Team merchant will not be charged. | Order |
-| 1700 | Canceled after ship | Order was canceled after shipper took the Porter. Shipper has to be contacted and Porter will return full. | Order |
-| 5000 | Finalized | There are no updates allowed after finalization step. | Order |
-| 8000 | Created | Porter shipment created | Vessel |
-| 8010 | Updated | Porter shipment updated | Vessel |
-| 8020 | Canceled | Porter shipment canceled | Vessel |
-| 8040 | Finalized | Porter shipment finalized | Vessel |
-| 8050 | Downloaded | Downloaded by Packer | Vessel |
-| 8100 | Released | The Porter was assembled and packed. | Vessel |
-| 8200 | Packed | The Porter was assembled and packed. | Vessel |
-| 8300 | Shipping label printed | Weight was submitted to server and shipping label obtained from shipper. | Vessel |
 | 8400 | Reported not shipped | Porter didn't leave packer facility. | Vessel |
 | 10000 | Shipped to zone skip | The Porter was given to zone skip driver. | Vessel |
-| 10100 | Delivered to zone skip | The Porter was delivered to cold storage. | Vessel |
-| 10200 | Delivered to shipper | Shipper obtained the Porter but system does not have confirmation yet. | Vessel |
 | 10300 | Tendered to shipper | Shipper confirmed Porter pickup by sending email or edi message. | Vessel |
 | 10400 | Delivery exception | Shipper could not deliver the Porter. | Vessel |
 | 10500 | Delivered to customer | Shipper confirmed delivery to customer. | Vessel |
-| 10600 | Reprinted return label | Shopper printed custom return shipping label. | Vessel |
-| 10700 | Shipped back | Shipper confirmed pickup. | Vessel |
-| 10750 | Shipped back using outbound label | Non-peeled outbound label was used for pickup at customer. | Vessel |
-| 10770 | Shipped back using outbound label | Non-peeled outbound label was used for pickup at customer. | Vessel |
-| 10800 | Returned to packer | Shipper confirmed delivery to packer facility. Lost Porter fee will not be charged. | Vessel |
-| 10900 | Received by packer | Packer confirmed the Porter delivery. | Vessel |
-| 11000 | Reported stolen | Shipper didn't receive the Porter and customer does not have it either. | Vessel |
-| 11100 | Reported lost | Stolen or lost shipping label. | Vessel |
-| 11150 | Reported not returned | Porter was gifted or sold to customer. | Vessel |
-| 11200 | Reported issue | Customer or merchant reported order or Porter issue. | Vessel |
-| 11300 | Lost Vessel Fee | Lost Porter fee has been charged. | Vessel |
 | 60000 | Created | Pickup request created | Pickup |
-| 60100 | Removed | Pickup request removed | Pickup |
 | 60200 | Scheduled | Pickup scheduled | Pickup |
 | 60300 | Canceled | Pickup canceled | Pickup |
 | 60400 | Missed | Pickup missed | Pickup |
