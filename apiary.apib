@@ -1,5 +1,5 @@
 FORMAT: 1A
-HOST: https://api3.sandbox.myfrcloud.com
+HOST: https://merchant-api.cf-staging.myfrcloud.com
 
 # FreshRealm REST API 3.0 Documentation
 
@@ -90,7 +90,7 @@ The following workflow will significantly improve performance of api data transe
 
  - load latest timestamp for resource from cache/db/filesystem
  - call api, apply timestamp and limit
-  - if `X-Pagination-Current-Page` header is less then `X-Pagination-Page-Count` call again with incremented offset
+ - if `X-Pagination-Current-Page` * `X-Pagination-Per-Page` header is less then `X-Pagination-Total-Count` call again with incremented offset
  - save timestamp from latest call to cache/db/filesystem
 
 # Vessel/Porter Terminology
@@ -98,6 +98,65 @@ Due to it's use in older resource URLs, this documentation refers to both Vessel
 
 # Contributing
 This API documentation lives on Github. If you see an error or a typo, please submit a pull request at [https://github.com/freshrealm/merchant-api-v3](https://github.com/freshrealm/merchant-api-v3). We're always happy to have contributions.
+
+# Changes from API 2
+Api 3, Revision 1 introduces new customer order data storage that help with GDPR compliance.
+
+## Order resource schema changes
+Order now includes complete shipping address and does not require customer to be created in advance. This change makes update of terms of use for GDPR easier. Api3 is still backwards compatible with api2, but new way of passing delivery address is encouriged.
+
+**api2**
+```json
+{
+    "customerId": 5,
+    "addressId": 5
+}
+```
+
+**api3**
+```json
+{
+    "address": {
+        ...
+    }
+}
+```
+
+## Order updates
+Direct updates are no longer supported. New process requires the old order to be canceled and new one placed instead.
+
+### Order timestamps
+`updateTime` and `createTime` has been replaced with `updatedAt` and `createdAt`. Format changed from unix timestamp to ISO 8601 with precission in miliseconds. **Important**: this change might require update in client order synchronization script.
+
+## Order fields that have been removed
+
+* codropId
+* manufactureDate
+* freshrealmSubtotal
+* shippingAndHandling
+* totalCost
+* displayOrderNumber
+* items.price
+* warnings
+* transactionId
+* trackingNumber (TODO: verify and add back)
+* cancelRequestDetail
+* customData
+* subscriptionId
+* subscriptionTemplateId
+* merchantPartnerId
+* confirmationNumber
+* replaceOrderId
+* modifiedItems
+* shippingTierId
+* shippingTierName
+* shippingTierNumber
+
+## Dropped API endpoints
+
+* productavailabilityextended
+* vesselload
+* shippingweekdays
 
 # Group Authentication
 FreshRealm’s REST API currently uses a proprietary authentication system. Each client gets its own API access token, which must be a part of every request sent to the FreshRealm API.  You must obtain this token by using our authentication call and supplying your secret, which we will provide to you.
@@ -1055,53 +1114,6 @@ The Skip Capacity Check flag defaults to true. When it is set to false, the "isO
             ]
         }
 
-##Get Shipping Week Days [/shippingweekdays?key={token}&zipcode={zipcode}]
-
-The days of the week for which Orders can be delivered for the provided zip code.
-Note that this does not reflect specific delivery dates that are blocked by holidays but is meant to be used to check general availability of a day of week for delivery.
-
-###Get shipping week days[GET]
-
-+ Parameters
-    + token (required, string)
-    + zipcode (required, integer)
-
-+ Response 200 (application/json)
-
-        {
-            "code": 200,
-            "timestamp": 1404151616,
-            "data": [
-                {
-                    "day": "Sunday",
-                    "available": false,
-                },
-                {
-                    "day": "Monday",
-                    "available": false,
-                },
-                {
-                    "day": "Tuesday",
-                    "available": true,
-                },
-                {
-                    "day": "Wednesday",
-                    "available": false,
-                },
-                {
-                    "day": "Thursday",
-                    "available": true,
-                },
-                {
-                    "day": "Friday",
-                    "available": false,
-                },
-                {
-                    "day": "Saturday",
-                    "available": true,
-                }
-            ]
-        }
 
 #Group Porter Pack
 These resources assist in checking how an order will be packed.
@@ -1291,43 +1303,28 @@ data:
 |-----------------------|-----------|---------------------------------------|
 | `id`            |  | FreshRealm Order Id |
 | `customerId` | X |  Customer Id, see `Customers` resource |
-| `codropId` | X |  Codrop Id, see `codrop` resource  |
 | `shippingAddressId` | X |  Shipping Address Id |
 | `status` | X |  One of the following: `authorized`, `processed`, `in_transit`, `at_customer`, `cancelled`, `in_transit_back, `vessel_returned` |
-| `manufactureDate` |  |  Manufacture Date for the order |
-| `freshrealmSubtotal` |  |  Freshrealm total cost |
-| `shippingAndHandling` |  |  Shipping and Handling charges for the order |
 | `cutoffTime` |  |  cutoff time to accept order |
-| `totalCost` |  |  total cost for the order |
-| `totalPrice` | X |  total price including Shipping and Handling |
-| `salesTax` | X |  sales tax for the order |
-| `updateTime` |  | update time for the order |
-| `createTime` |  |  Create time when the order was created |
+| `totalPrice` | X |  total price charged including Shipping and Handling |
+| `salesTax` | X |  sales tax collected |
+| `updatedAt` |  | date time in ISO 8601 |
+| `createdAt` |  |  date time in ISO 8601 |
 | `orderNumber` | X |  merchant's order number provided by e-commerce platform  |
 | `deliveryDate` | X |  delivery date for the order |
 | `items` | X | list of all items in the order |
 | `pickupDate` | X |  pickup date for the order|
 | `shipMethod` | X* |  ship method for the order |
-| `warnings` |  |  any warnings or instructions for unexpected scenarios |
-| `transactionId` | X |  transaction id from merchant services provider |
 | `trackingNumber` |  |  Porter tracking number |
-| `customData` |  |  Key value pairs of data associated with the order |
-| `subscriptionId` | X |  merchant's subscription id if order is part of subscription |
-| `subscriptionTemplateId` | X |  merchant's subscription template id if order is part of a subscription with a fixed product template |
 | `confirmationNumber` |   | Confirmation number is generated once order is authorized. It is 12 digit numerical code. |
-| `replaceOrderId` | X | When order updates are done through canceling old orders and placing new one, provide FreshRealm order id of canceled order to keep all modified orders in the same group. |
-| `modifiedItems` |   | Contains list of food items that have been removed or replaced during fullfilment stage. Missing item: {sku, productName, upc, itemName, status: 'missing'}, replaced item: {sku, productName, upc, itemName, originalItemName, originalUpc, staus: 'replaced'}|
-| `shippingTierId` |   | Shipping tier that indirectly coresponds to shipping zone from shipper to support different pricing models on shipping charge. Zone is estimated based on distance between pack facility and customer location. This is auto increment number. |
-| `shippingTierName` |   | Description of shipping tier |
-| `shippingTierNumber` |   | Lower shipping tiers are closer to customer |
 | `packingFacility`   |    | Food packer - "SAC" or "NJ"  |
-| `checkPurchasable`  |    | Flag (values 0,1) to check that all products in order are available on delivery date. Set to "1" by default. |
+
  \*ship method can not be edited once created.
 
 #### Items Attributes
 | field | required  | type      | example                           | description |
 |---------------|:-:|-----------|-----------------------------------|-------------|
-| `sku`          | * | string       | `1`                               | Merchant SKU number |
+| `sku`         | * | string    | `1`                               | Merchant SKU number |
 | `quantity`    | * | int       | `1`                               | Quantity |
 
 Products should be ordered by SKU.  The SKU can be modified by contacting FreshRealm Customer Service.
@@ -1339,63 +1336,90 @@ Products should be ordered by SKU.  The SKU can be modified by contacting FreshR
     + Body
 
             {
+                "orderNumber": "123456",
                 "status": "authorized",
-                "customerId": 7069,
-                "shippingAddressId": 7427,
-                "items": [{
-                    "sku": "1674",
-                    "quantity": 3
-                },{
-                    "sku": "1675",
-                    "quantity": 4
-                }],
-                "totalPrice": "20.98",
-                "salesTax": "0",
-                "deliveryDate": "2014-06-01",
+                "salesTax": 0,
+                "totalPrice": 99.99,
+                "deliveryDate": "2018-06-28",
+                "address": {
+                    "fullName": "Hungry Eater",
+                    "streetAndNumber": "34 N Palm St",
+                    "aptSuite": "Ste 100",
+                    "city": "Ventura",
+                    "state": "CA",
+                    "zipcode": "93001",
+                    "deliveryInstructions": "leave the package in the lobby"
+                },
+                "items": [
+                    {
+                        "sku": "39814",
+                        "quantity": "1"
+                    },
+                    {
+                        "sku": "20737",
+                        "quantity": "1"
+                    },
+                    {
+                        "sku": "07031",
+                        "quantity": "1"
+                    }
+                ]
             }
 
 + Response 200 (application/json)
 
-        {
-            "code": 200,
-            "timestamp": 1401213818,
-            "data": {
-                "id": "10489",
-                "customerId": "7069",
-                "codropId": null,
-                "shippingAddressId": "7427",
-                "status": "authorized",
-                "manufactureDate": "2014-06-02",
-                "freshrealmSubtotal": 4.05,
-                "shippingAndHandling": 30.79182,
-                "cutOffTime": "2014-05-30 17:00",
-                "totalCost": 34.84182,
-                "totalPrice": "20.98",
-                "salesTax": "0",
-                "updateTime": 1401213818,
-                "createTime": 1401213818,
-                "orderNumber": null,
-                "deliveryDate": "2014-06-02",
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-                ],
-                "pickupDate": null,
-                "shipMethod": "FEDEX_GROUND",
-                "warnings": [
-                    {
-                        "type": "modifiedDeliveryDate",
-                        "message": "Delivery date was modified"
-                    }
-                ]
+    {
+        "id": 16,
+        "orderNumber": "123456",
+        "shippingAddressId": 89574,
+        "addressId": 6,
+        "status": "authorized",
+        "cutOffTime": "2018-06-24T19:45:00.000Z",
+        "deliveryDate": "2018-06-28",
+        "packDate": "2018-06-27",
+        "pickupDate": null,
+        "totalPrice": 103.38,
+        "shipMethod": "fedex_ground_2day",
+        "packingFacility": "SAC",
+        "createdAt": "2018-06-21T20:42:25.918Z",
+        "updatedAt": "2018-06-21T20:42:25.918Z",
+        "address": {
+            "id": 6,
+            "fullName": "Hungry Eater",
+            "phoneNumber": "8002641297",
+            "prefix": null,
+            "streetAndNumber": "34 N Palm St",
+            "aptSuite": null,
+            "city": "Ventura",
+            "state": "CA",
+            "zipcode": "93001",
+            "plus4Code": null,
+            "deliveryInstructions": "leave the package in the lobby",
+            "pickupInstructions": null,
+            "pickupLocation": null,
+            "type": "476-E-MAIN-ST-VENTURA-93001-CA",
+            "recordType": null,
+            "validationStatus": null,
+            "uniqueIdentifier": "476-E-MAIN-ST-VENTURA-93001-CA",
+            "override": false,
+            "createdAt": "2018-06-21T20:42:25.681Z",
+            "updatedAt": "2018-06-21T20:42:25.681Z"
+        },
+        "items": [
+            {
+                "sku": "39814",
+                "quantity": "1"
+            },
+            {
+                "sku": "20737",
+                "quantity": "1"
+            },
+            {
+                "sku": "07031",
+                "quantity": "1"
             }
-        }
+        ]
+    }
 
 ## List Orders [/orders?key={token}&limit={limit}]
 
@@ -1408,101 +1432,61 @@ Retrieve all the latest orders (default limit is 100 results)
 
 + Response 200 (application/json)
 
-        {
-            "code": 200,
-            "timestamp": 1401213818,
-            "data": [{
-                "id": "10489",
-                "customerId": "7069",
-                "codropId": null,
-                "shippingAddressId": "7427",
-                "status": "authorized",
-                "manufactureDate": "2014-06-02",
-                "freshrealmSubtotal": 4.05,
-                "shippingAndHandling": 30.79182,
-                "cutOffTime": "2014-05-30 17:00",
-                "totalCost": 34.84182,
-                "totalPrice": "20.98",
-                "salesTax": "0",
-                "updateTime": 1401213818,
-                "createTime": 1401213818,
-                "orderNumber": null,
-                "deliveryDate": "2014-06-02",
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-                ],
-                "pickupDate": null,
-                "shipMethod": "FEDEX_GROUND"
-            },{
-                "id": "10490",
-                "customerId": "7069",
-                "codropId": null,
-                "shippingAddressId": "7427",
-                "status": "authorized",
-                "manufactureDate": "2014-06-02",
-                "freshrealmSubtotal": 4.05,
-                "shippingAndHandling": 30.79182,
-                "cutOffTime": "2014-05-30 17:00",
-                "totalCost": 34.84182,
-                "totalPrice": "20.98",
-                "salesTax": "0",
-                "updateTime": 1401213818,
-                "createTime": 1401213818,
-                "orderNumber": null,
-                "deliveryDate": "2014-06-02",
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-                ],
-                "pickupDate": null,
-                "shipMethod": "FEDEX_GROUND"
-            },{
-                "id": "10491",
-                "customerId": "7069",
-                "codropId": null,
-                "shippingAddressId": "7427",
-                "status": "authorized",
-                "manufactureDate": "2014-06-02",
-                "freshrealmSubtotal": 4.05,
-                "shippingAndHandling": 30.79182,
-                "cutOffTime": "2014-05-30 17:00",
-                "totalCost": 34.84182,
-                "totalPrice": "20.98",
-                "salesTax": "0",
-                "updateTime": 1401213818,
-                "createTime": 1401213818,
-                "orderNumber": null,
-                "deliveryDate": "2014-06-02",
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-                ],
-                "pickupDate": null,
-                "shipMethod": "FEDEX_GROUND"
-            }]
-        }
+    [{
+        "id": 16,
+        "orderNumber": "123456",
+        "shippingAddressId": 89574,
+        "addressId": 6,
+        "status": "authorized",
+        "cutOffTime": "2018-06-24T19:45:00.000Z",
+        "deliveryDate": "2018-06-28",
+        "packDate": "2018-06-27",
+        "pickupDate": null,
+        "totalPrice": 103.38,
+        "shipMethod": "fedex_ground_2day",
+        "packingFacility": "SAC",
+        "createdAt": "2018-06-21T20:42:25.918Z",
+        "updatedAt": "2018-06-21T20:42:25.918Z",
+        "address": {
+            "id": 6,
+            "fullName": "Hungry Eater",
+            "phoneNumber": "8002641297",
+            "prefix": null,
+            "streetAndNumber": "34 N Palm St",
+            "aptSuite": null,
+            "city": "Ventura",
+            "state": "CA",
+            "zipcode": "93001",
+            "plus4Code": null,
+            "deliveryInstructions": "leave the package in the lobby",
+            "pickupInstructions": null,
+            "pickupLocation": null,
+            "type": "476-E-MAIN-ST-VENTURA-93001-CA",
+            "recordType": null,
+            "validationStatus": null,
+            "uniqueIdentifier": "476-E-MAIN-ST-VENTURA-93001-CA",
+            "override": false,
+            "createdAt": "2018-06-21T20:42:25.681Z",
+            "updatedAt": "2018-06-21T20:42:25.681Z"
+        },
+        "items": [
+            {
+                "sku": "39814",
+                "quantity": "1"
+            },
+            {
+                "sku": "20737",
+                "quantity": "1"
+            },
+            {
+                "sku": "07031",
+                "quantity": "1"
+            }
+        ]
+    }]
 
 ## Order Resource [/orders/{orderId}?key={token}]
-Use this URL to `GET` order information or `PUT` changes to the order.
+Use this URL to `GET` order information
 
 ### Fetch Order [GET]
 + Parameters
@@ -1512,139 +1496,57 @@ Use this URL to `GET` order information or `PUT` changes to the order.
 + Response 200 (application/json)
 
         {
-            "code": 200,
-            "timestamp": 1402706999
-            "data": {
-                "id": "10490",
-                "customerId": "7069",
-                "codropId": null,
-                "shippingAddressId": "7427",
-                "status": "authorized",
-                "manufactureDate": "2014-06-02",
-                "freshrealmSubtotal": 4.05,
-                "shippingAndHandling": 30.79182,
-                "cutOffTime": "2014-05-30 17:00",
-                "totalCost": 34.84182,
-                "totalPrice": "20.98",
-                "salesTax": "0",
-                "updateTime": 1401213818,
-                "createTime": 1401213818,
-                "orderNumber": null,
-                "deliveryDate": "2014-06-02",
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-                ],
-                "pickupDate": null,
-                "shipMethod": "fedex_ground"
-            }
+            "id": 16,
+            "orderNumber": "123456",
+            "shippingAddressId": 89574,
+            "addressId": 6,
+            "status": "authorized",
+            "cutOffTime": "2018-06-24T19:45:00.000Z",
+            "deliveryDate": "2018-06-28",
+            "packDate": "2018-06-27",
+            "pickupDate": null,
+            "totalPrice": 103.38,
+            "shipMethod": "fedex_ground_2day",
+            "packingFacility": "SAC",
+            "createdAt": "2018-06-21T20:42:25.918Z",
+            "updatedAt": "2018-06-21T20:42:25.918Z",
+            "address": {
+                "id": 6,
+                "fullName": "Hungry Eater",
+                "phoneNumber": "8002641297",
+                "prefix": null,
+                "streetAndNumber": "34 N Palm St",
+                "aptSuite": null,
+                "city": "Ventura",
+                "state": "CA",
+                "zipcode": "93001",
+                "plus4Code": null,
+                "deliveryInstructions": "leave the package in the lobby",
+                "pickupInstructions": null,
+                "pickupLocation": null,
+                "type": "476-E-MAIN-ST-VENTURA-93001-CA",
+                "recordType": null,
+                "validationStatus": null,
+                "uniqueIdentifier": "476-E-MAIN-ST-VENTURA-93001-CA",
+                "override": false,
+                "createdAt": "2018-06-21T20:42:25.681Z",
+                "updatedAt": "2018-06-21T20:42:25.681Z"
+            },
+            "items": [
+                {
+                    "sku": "39814",
+                    "quantity": "1"
+                },
+                {
+                    "sku": "20737",
+                    "quantity": "1"
+                },
+                {
+                    "sku": "07031",
+                    "quantity": "1"
+                }
+            ]
         }
-
-### Update Delivery Date [PUT]
-Have order delivered on different date than originally submitted. Delivery date change can be executed before cut off time of old and new delivery date. Use dates from availability calendar as input to this API call.
-If delivery date is not available server returns 400 error.
-
-+ Parameters
-    + orderId (required, number, `109`)
-    + token (required, string)
-
-+ Request (application/json)
-
-    + Body
-
-            {
-                "deliveryDate": "2015-03-14",
-            }
-
-+ Response 200 (application/json)
-
-        {
-            "code": 200,
-            "timestamp": 1377020859,
-            "data": {
-                "id":109,
-                "deliveryDate": "2015-03-14",
-            }
-        }
-
-### Update Delivery Address [PUT]
-Delivery address can be updated after cut off time and before shipping label is printed. Address can be changed as long as the shipping service stays the same. For example, it is not possible to update address from California to New York if Porter is supposed to be delivered by ground service. It is possible to change ground regions as long as the change is performed before cut off time for both zones. Zone change might create
-new cut off time.
-
-+ Parameters
-    + orderId (required, number, `109`)
-    + token (required, string)
-
-+ Request (application/json)
-
-    + Body
-
-            {
-                "shippingAddressId": "79920",
-            }
-
-+ Response 200 (application/json)
-
-        {
-            "code": 200,
-            "timestamp": 1377020859,
-            "data": {
-                "id":109,
-                "shippingAddressId": "79920",
-            }
-        }
-
-### Update Products [PUT]
-Customer can swap items on order before cut off time. If swap is performed, merchant is responsible for differences in food price. Swaps can be executed before cut off time, but cut off time might be updated as well. This operation accepts full final set of products after swap. It is recommended to use `vesselLoad` API call to make sure item change won't result into use of additional Porter.
-
-+ Parameters
-    + orderId (required, number, `109`)
-    + token (required, string)
-
-+ Request (application/json)
-
-    + Body
-
-            {
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-            }
-
-+ Response 200 (application/json)
-
-        {
-            "code": 200,
-            "timestamp": 1377020859,
-            "data": {
-                "id":109,
-                "items": [
-                    {
-                        "sku": "1674",
-                        "quantity": 3
-                    },
-                    {
-                        "sku": "1675",
-                        "quantity": 4
-                    }
-                ],
-            }
-        }
-
-### Update Status [PUT]
-Order can be canceled through status updated. Supported input values for status update are `authorized`, and `cancelled`.
 
 ## Cancel an Order [/orders/cancel/{orderId}?key={token}]
 
@@ -1659,17 +1561,22 @@ Order can be typically canceled before cut off time with no consequences. API su
 
         {
             "code": 200,
-            "timestamp": 1377020859,
+            "timestamp": "1529619146",
             "data": {
-                "id":109,
+                "id": 50,
+                "orderNumber": "123456",
+                "shippingAddressId": 89606,
+                "addressId": 65,
                 "status": "cancelled",
-                "cancelRequestDetail": {
-                    "id" => 54114,
-                    "reason" => "API test",
-                    "event" => "Canceled after cut off time",
-                    "cancelTime" => "2015-03-25 17:33:39"
-                    "source" => "api"
-                }
+                "cutOffTime": "2018-06-25T17:45:00.000Z",
+                "deliveryDate": "2018-06-28",
+                "packDate": "2018-06-27",
+                "pickupDate": null,
+                "totalPrice": 103.38,
+                "shipMethod": "fedex_ground",
+                "packingFacility": "NJ",
+                "createdAt": "2018-06-21T21:43:53.390Z",
+                "updatedAt": "2018-06-21T22:12:28.000Z"
             }
         }
 
@@ -1703,7 +1610,7 @@ Pickup address id can be optionally passed into this call to change pickup locat
             "data": {
                 "orderId":109,
                 "addressId": "1154",
-                "date" => "2015-03-14"
+                "date": "2015-03-14"
             }
         }
 
@@ -1730,7 +1637,7 @@ Pickup address id can be optionally passed into this call to change pickup locat
             "data": {
                 "orderId":109,
                 "addressId": "1154",
-                "date" => "2015-03-14"
+                "date": "2015-03-14"
             }
         }
 
@@ -1770,7 +1677,7 @@ Download a shipping label created with the Create Shipping Label method.  Shippi
 
 # Group Customers
 
-This operation can be used to find a customer and to get all the orders for the customer.
+This resource will be removed in the next revision - please review API 3 changes.
 
 |Field                      |Can edit        |Description |
 |---------------------------|---------------|------------|
@@ -1798,12 +1705,12 @@ This operation can be used to find a customer and to get all the orders for the 
 
 + Request (application/json)
 
-        {  "firstName": "Mark",
-            "lastName": "Zuckeberg",
-            "email": "zuckeberg@freshrealm.co",
+        {  "firstName": "Hungry",
+            "lastName": "Eater",
+            "email": "eater@freshrealm.co",
             "mobilePhoneNumber": "888-457-4547",
             "address": {
-                    "streetAndNumber": "139 Wall St",
+                    "streetAndNumber": "476 E Main St",
                     "aptSuite": "H",
                     "city": "Ventura",
                     "state": "CA",
@@ -1818,12 +1725,12 @@ This operation can be used to find a customer and to get all the orders for the 
             "timestamp": 1377020859,
             "data":
             {
-            "firstName": "Mark",
-            "lastName": "Zuckeberg",
-            "email": "zuckeberg@freshrealm.co",
+            "firstName": "Hungry",
+            "lastName": "Eater",
+            "email": "eater@freshrealm.co",
             "mobilePhoneNumber": "888-457-4547",
             "address": {
-                    "streetAndNumber": "139 Wall St",
+                    "streetAndNumber": "476 E Main St",
                     "aptSuite": "H",
                     "city": "Ventura",
                     "state": "CA",
@@ -1834,6 +1741,7 @@ This operation can be used to find a customer and to get all the orders for the 
 
 # Group Addresses
 
+**Note**: this resource is obsolete and will be removed in the next major revision. Addresses are now part of order resource.
 List of all shopper addresses. Periodic address synchronization ensures that address on e-commerce platform is the same as the one in FreshRealm's records.
 
 |Field                      |Can edit        |Description |
